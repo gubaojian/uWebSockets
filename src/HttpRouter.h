@@ -302,6 +302,10 @@ public:
 
         /* ANY method must be last, GET must be first */
         std::sort(root.children.begin(), root.children.end(), [](const auto &a, const auto &b) {
+            //FIX std::sort  Your comparator is not a valid strict-weak ordering
+            if (a->name == b->name) {
+                return false;
+            }
             /* Assuming the list of methods is unique, non-repeating */
             if (a->name == "GET") {
                 return true;
