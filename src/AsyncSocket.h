@@ -75,7 +75,10 @@ private:
             us_poll_change(p, loop, events);
         }
     }
-
+public:
+    void setSendBufferNoNeedShinkToFit() {
+        getAsyncSocketData()->buffer.setSendBufferNoNeedShinkToFit();
+    }
 protected:
     /* Returns SSL pointer or FD as pointer */
     void *getNativeHandle() {
@@ -171,6 +174,11 @@ protected:
                 return {sendBuffer, SendBufferAttribute::NEEDS_UNCORK};
             }
         } else {
+            auto sendBufferAttribute = SendBufferAttribute::NEEDS_DRAIN;
+            // if buffer not empty, means backpressure, which has register epoll write event will auto drain, none need drain  by handle
+            if (backPressure.length() > 0) {
+                sendBufferAttribute = SendBufferAttribute::NEEDS_NOTHING;
+            }
 
             /* If we are corked and there is already data in the cork buffer,
             mark how much is ours and reset it */
@@ -186,7 +194,7 @@ protected:
             /* And copy corkbuffer in front */
             memcpy((char *) backPressure.data() + existingBackpressure, loopData->corkBuffer, ourCorkOffset);
 
-            return {(char *) backPressure.data() + ourCorkOffset + existingBackpressure, SendBufferAttribute::NEEDS_DRAIN};
+            return {(char *) backPressure.data() + ourCorkOffset + existingBackpressure, sendBufferAttribute};
         }
     }
 
@@ -253,9 +261,11 @@ protected:
         if (asyncSocketData->buffer.length()) {
             /* Write off as much as we can */
             int written = us_socket_write(SSL, (us_socket_t *) this, asyncSocketData->buffer.data(), (int) asyncSocketData->buffer.length(), /*nextLength != 0 | */length);
-
+            //std::cout << "asyncSocketData->buffer socket write write: " << asyncSocketData->buffer.length() << "write " << written << std::endl;
             /* On failure return, otherwise continue down the function */
             if ((unsigned int) written < asyncSocketData->buffer.length()) {
+
+                //std::cout << "asyncSocketData->buffer socket write write: " <<  std::endl;
 
                 /* Update buffering (todo: we can do better here if we keep track of what happens to this guy later on) */
                 asyncSocketData->buffer.erase((unsigned int) written);

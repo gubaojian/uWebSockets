@@ -25,6 +25,8 @@ namespace uWS {
 struct BackPressure {
     std::string buffer;
     unsigned int pendingRemoval = 0;
+    bool shrink_to_fit_when_clear = true;
+
     BackPressure(BackPressure &&other) {
         buffer = std::move(other.buffer);
         pendingRemoval = other.pendingRemoval;
@@ -34,10 +36,24 @@ struct BackPressure {
         buffer.append(data, length);
     }
     void erase(unsigned int length) {
+        if (length <= 0) {
+            return;
+        }
         pendingRemoval += length;
-        /* Always erase a minimum of 1/32th the current backpressure */
-        if (pendingRemoval > (buffer.length() >> 5)) {
-            std::string(buffer.begin() + pendingRemoval, buffer.end()).swap(buffer);
+        /* Always erase a minimum of 1/2th the current backpressure, then can call drain to fill remain half buffer */
+        if (pendingRemoval > (buffer.length() / 2)) {
+            size_t remainSize = buffer.length() - pendingRemoval;
+            // if buffer is big enough for next read, none need drain, for big remain data memmove is waste time
+            if (remainSize > 128*1024) {
+                return;
+            }
+            // for big remain data memmove is waste time, only move data if remain data is not enough for next read.
+            if (remainSize != 0) {
+                memmove(buffer.data(), buffer.data() + pendingRemoval, remainSize);
+                buffer.resize(buffer.length() - pendingRemoval);
+            }  else {
+                buffer.clear();
+            }
             pendingRemoval = 0;
         }
     }
@@ -48,7 +64,9 @@ struct BackPressure {
     void clear() {
         pendingRemoval = 0;
         buffer.clear();
-        buffer.shrink_to_fit();
+        if (shrink_to_fit_when_clear) {
+            buffer.shrink_to_fit();
+        }
     }
     /* Only used by AsyncSocket::write (optionally) before append */
     void reserve(size_t length) {
@@ -64,6 +82,10 @@ struct BackPressure {
     /* The total length, incuding pending removal */
     size_t totalLength() {
         return buffer.length();
+    }
+
+    void setSendBufferNoNeedShinkToFit() {
+        shrink_to_fit_when_clear = false;
     }
 };
 

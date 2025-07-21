@@ -95,8 +95,11 @@ public:
     /* Be silent */
     bool noMark = false;
 
-    /* Good 16k for SSL perf. */
-    static const unsigned int CORK_BUFFER_SIZE = 16 * 1024;
+    /* Good 16k for SSL perf for uWebsockets.
+     * 4kb is enough for wsg connection, can reduce memory per connect,
+     * none need big cork, if has a lot of message, it will be connect use backpressure buffer
+     * */
+    static const unsigned int CORK_BUFFER_SIZE = 4 * 1024;
 
     /* Cork data */
     char *corkBuffer = new char[CORK_BUFFER_SIZE];

@@ -34,6 +34,13 @@ enum CompressFlags : int {
     ALREADY_COMPRESSED
 };
 
+
+struct uWSMessage {
+    std::string_view message;
+    OpCode opCode;
+};
+
+
 template <bool SSL, bool isServer, typename USERDATA>
 struct WebSocket : AsyncSocket<SSL> {
     template <bool> friend struct TemplatedApp;
@@ -218,6 +225,77 @@ public:
         /* Return success */
         return SUCCESS;
     }
+
+     bool hasSendBufferSpace() {
+        WebSocketContextData<SSL, USERDATA> *webSocketContextData = (WebSocketContextData<SSL, USERDATA> *) us_socket_context_ext(SSL,
+            (us_socket_context_t *) us_socket_context(SSL, (us_socket_t *) this)
+        );
+        if (webSocketContextData->maxBackpressure && webSocketContextData->maxBackpressure < getBufferedAmount()) {
+            return false;
+        }
+        return true;
+    }
+
+     SendStatus sendBatch(std::vector<uWSMessage>& messages) {
+        int compress = false;
+        bool fin = true;
+        WebSocketContextData<SSL, USERDATA> *webSocketContextData = (WebSocketContextData<SSL, USERDATA> *) us_socket_context_ext(SSL,
+            (us_socket_context_t *) us_socket_context(SSL, (us_socket_t *) this)
+        );
+
+        /* If we are subscribers and have messages to drain we need to drain them here to stay synced */
+        WebSocketData *webSocketData = (WebSocketData *) Super::getAsyncSocketData();
+
+        if (webSocketData->subscriber) {
+            /* This will call back into us, send. */
+             webSocketContextData->topicTree->drain(webSocketData->subscriber);
+        }
+
+        /* Get size, allocate size, write if needed */
+        size_t batchMessageFrameSize = 0;
+        for (int i=0; i < messages.size(); i++) {
+            std::string_view& message = messages[i].message;
+            batchMessageFrameSize += protocol::messageFrameSize(message.length());
+        }
+        auto [sendBuffer, sendBufferAttribute] = Super::getSendBuffer(batchMessageFrameSize);
+
+        char *batchBuffer = sendBuffer;
+        for (int i=0; i < messages.size(); i++) {
+            std::string_view& message = messages[i].message;
+            OpCode opCode =  messages[i].opCode;
+            protocol::formatMessage<isServer>(batchBuffer, message.data(), message.length(), opCode, message.length(), compress, fin);
+            size_t messageFrameSize = protocol::messageFrameSize(message.length());
+            batchBuffer += messageFrameSize;
+        }
+
+
+        /* Depending on size of message we have different paths */
+        if (sendBufferAttribute == SendBufferAttribute::NEEDS_DRAIN) {
+            /* This is a drain */
+            auto[written, failed] = Super::write(nullptr, 0);
+            if (failed) {
+                /* Return false for failure, skipping to reset the timeout below */
+                return BACKPRESSURE;
+            }
+        } else if (sendBufferAttribute == SendBufferAttribute::NEEDS_UNCORK) {
+            /* Uncork if we came here uncorked */
+            auto [written, failed] = Super::uncork();
+            if (failed) {
+                return BACKPRESSURE;
+            }
+        }
+
+        /* Every successful send resets the timeout */
+        if (webSocketContextData->resetIdleTimeoutOnSend) {
+            Super::timeout(webSocketContextData->idleTimeoutComponents.first);
+            WebSocketData *webSocketData = (WebSocketData *) Super::getAsyncSocketData();
+            webSocketData->hasTimedOut = false;
+        }
+
+        /* Return success */
+        return SUCCESS;
+    }
+
 
     /* Send websocket close frame, emit close event, send FIN if successful.
      * Will not append a close reason if code is 0 or 1005. */
