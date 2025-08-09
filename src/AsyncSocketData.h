@@ -64,7 +64,7 @@ struct BackPressure {
     void clear() {
         pendingRemoval = 0;
         buffer.clear();
-        if (shrink_to_fit_when_clear) {
+        if (shrink_to_fit_when_clear || buffer.capacity() > 1024*1024*8) {
             buffer.shrink_to_fit();
         }
     }
