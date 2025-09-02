@@ -301,14 +301,19 @@ private:
             asyncSocket->timeout(webSocketContextData->idleTimeoutComponents.first);
             webSocketData->hasTimedOut = false;
 
-            /* We always cork on data */
-            asyncSocket->cork();
+            /* We always cork on data， when no backpressure  */
+            bool canCork = asyncSocket->getBufferedAmount() <= 0;
+            if (canCork) {
+                asyncSocket->cork();
+            }
 
             /* This parser has virtually no overhead */
             WebSocketProtocol<isServer, WebSocketContext<SSL, isServer, USERDATA>>::consume(data, (unsigned int) length, (WebSocketState<isServer> *) webSocketData, s);
 
             /* Uncorking a closed socekt is fine, in fact it is needed */
-            asyncSocket->uncork();
+            if (canCork) {
+                asyncSocket->uncork();
+            }
 
             /* If uncorking was successful and we are in shutdown state then send TCP FIN */
             if (asyncSocket->getBufferedAmount() == 0) {
