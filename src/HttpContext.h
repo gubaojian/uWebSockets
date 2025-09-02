@@ -31,6 +31,9 @@
 #include "MoveOnlyFunction.h"
 
 namespace uWS {
+
+static char* WS_CLOSE_HTTP_ERROR_REASON  = " httpErrorResponses close socket";
+
 template<bool> struct HttpResponse;
 
 template <bool SSL>
@@ -262,7 +265,7 @@ private:
                 us_socket_write(SSL, s, httpErrorResponses[err].data(), (int) httpErrorResponses[err].length(), false);
                 us_socket_shutdown(SSL, s);
                 /* Close any socket on HTTP errors */
-                us_socket_close(SSL, s, 0, nullptr);
+                us_socket_close(SSL, s, 0,  WS_CLOSE_HTTP_ERROR_REASON);
                 /* This just makes the following code act as if the socket was closed from error inside the parser. */
                 returnedSocket = nullptr;
             }
